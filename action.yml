@@ -1,0 +1,32 @@
+name: 'Automated Repository Archival'
+author: 'Brett Logan'
+description: 'Automates the scheduling and archival of GitHub repositories'
+inputs:
+  action:
+    description: 'The action to perform: notify or archive'
+    required: true
+    default: 'notify'
+  days:
+    description: 'Number of days repository must be inactive before being flagged for archival'
+    required: true
+    default: '365'
+  owner:
+    description: 'GitHub organization or user to scan for target repositories'
+    required: true
+    default: ${{ github.repository_owner }}
+  guidelines:
+    description: 'The URL to your archival policy'
+    required: false
+  adminTeam:
+    description: 'The GitHub team name to include in the issue body'
+    required: true
+  adminEmail:
+    description: 'The email to include in the issue body'
+    required: true
+  token:
+    description: 'GitHub PAT'
+    required: true
+    default: ${{ github.token }}
+runs:
+  using: node12
+  main: dist/main.js
