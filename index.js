@@ -29,6 +29,7 @@ const octokit = new _Octokit({
 })
 
 async function collect(owner, days) {
+    console.log("WEIRD")
     try {
         core.info(`Querying repositories for organization: ${owner}`)
         const repos = await octokit.paginate(octokit.repos.listForOrg, {
@@ -50,6 +51,7 @@ async function collect(owner, days) {
                 const lastNotified = new Date(_lastNotified)
                 if (!scanned && !repo.archived && lastPushed < backdate) {
                     core.info(`Scanning dormant repository: ${repo.name}`)
+                    const admins = await getAdmins(repo, orgAdmins)
                     await db.addRepo(repo.name, {
                         owner: repo.owner.login,
                         name: repo.name,
@@ -57,18 +59,20 @@ async function collect(owner, days) {
                         hasIssues: repo.has_issues,
                         lastUpdated: lastPushed,
                         lastNotified: null,
-                        admins: [],
-                        adminTeamMembers: [],
+                        admins: admins.admins,
+                        adminTeamMembers: admins.adminTeamMembers,
                         notified: false,
                         issueNumber: null
                     })
-                    await updateAdmins(repo, orgAdmins)
                 } else if (lastNotified && lastNotified < backdate) {
                     core.info(`Rescanning previously scanned repository: ${repo.name}`)
                     await db.setNotified(repo.name, false)
                     await db.setIssueNumber(repo.name, null)
                     await db.setLastNotified(repo.name, null)
-                    await updateAdmins(repo, orgAdmins)
+
+                    const admins = await getAdmins(repo, orgAdmins)
+                    await db.setAdmins(repo.name, admins.admins)
+                    await db.setTeamMembers(repo.name, admins.adminTeamMembers)
                 } else {
                     core.info(`Skipping non-dormant repository: ${repo.name}`)
                 }
@@ -167,15 +171,18 @@ async function openIssues() {
                 let issue
                 try {
                     core.info(`Opening issue for ${repo.owner}/${repo.name}`)
+                    const admins = repo.admins.concat(repo.adminTeamMembers)
                     issue = await octokit.issues.create({
                         owner: repo.owner,
                         repo: repo.name,
                         title: 'Notice: This repository has been marked for archival, please respond',
                         body: issueBody,
-                        assignees: uniq(repo.admins.concat(repo.adminTeamMembers))
+                        assignees: uniq(admins)
                     })
                 } catch (error) {
-                    console.log(`Unable to open issue in ${repo.owner}/${repo.name}: ${error.message}`)
+                    core.info(`Unable to open issue in ${repo.owner}/${repo.name}: ${error.message}`)
+                    console.log("hello")
+                    console.log(error)
                     continue
                 }
                 await db.setIssueNumber(repo.name, issue.data.number)
@@ -188,7 +195,7 @@ async function openIssues() {
     }
 }
 
-async function updateAdmins(repo, orgAdmins) {
+async function getAdmins(repo, orgAdmins) {
     try {
         core.info(`Updating repository admin information`)
         const adminTeamMembers = []
@@ -212,8 +219,11 @@ async function updateAdmins(repo, orgAdmins) {
                 }
             }
         }
-        await db.setAdmins(repo.name, uniq(admins))
-        await db.setTeamMembers(repo.name, uniq(adminTeamMembers))
+        core.info("Returning admins")
+        return {
+            admins: uniq(admins),
+            adminTeamMembers: uniq(adminTeamMembers)
+        }
     } catch (error) {
         throw error
     }

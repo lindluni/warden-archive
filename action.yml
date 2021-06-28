@@ -24,9 +24,8 @@ inputs:
     description: 'The email to include in the issue body'
     required: true
   token:
-    description: 'GitHub PAT'
+    description: 'GitHub Admin PAT'
     required: true
-    default: ${{ github.token }}
 runs:
   using: node12
   main: dist/index.js
