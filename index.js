@@ -30,16 +30,18 @@ const octokit = new _Octokit({
 
 async function collect(owner, days) {
     try {
+        core.info(`Querying repositories for organization: ${owner}`)
         const repos = await octokit.paginate(octokit.repos.listForOrg, {
             org: owner,
             per_page: 100,
             type: 'all'
         })
+        core.info(`Found ${repos.length} repos`)
 
-        const orgAdmins = await getOrgOwners(owner)
         const backdate = new Date()
         backdate.setDate(backdate.getDate() - days)
 
+        const orgAdmins = await getOrgOwners(owner)
         for (const repo of repos) {
             try {
                 const scanned = await db.scanned(repo.name)
@@ -47,6 +49,7 @@ async function collect(owner, days) {
                 const _lastNotified = await db.getLastNotified(repo.name)
                 const lastNotified = new Date(_lastNotified)
                 if (!scanned && !repo.archived && lastPushed < backdate) {
+                    core.info(`Scanning dormant repository: ${repo.name}`)
                     await db.addRepo(repo.name, {
                         owner: repo.owner.login,
                         name: repo.name,
@@ -61,76 +64,86 @@ async function collect(owner, days) {
                     })
                     await updateAdmins(repo, orgAdmins)
                 } else if (lastNotified && lastNotified < backdate) {
+                    core.info(`Rescanning previously scanned repository: ${repo.name}`)
                     await db.setNotified(repo.name, false)
                     await db.setIssueNumber(repo.name, null)
                     await db.setLastNotified(repo.name, null)
                     await updateAdmins(repo, orgAdmins)
+                } else {
+                    core.info(`Skipping non-dormant repository: ${repo.name}`)
                 }
-            } catch (e) {
-                console.log(`Unable to scan repository [${repo.name}]: ${e.message}`)
+            } catch (error) {
+                core.warning(`Unable to scan repository ${repo.owner.login}/${repo.name}: ${error.message}`)
             }
         }
-    } catch (e) {
-        throw e
+    } catch (error) {
+        throw new Error(`Failed querying repos: ${error.message}`)
+
     }
 }
 
 async function getOrgOwners(org) {
     try {
+        core.info('Query organization admins')
         const admins = await octokit.paginate(octokit.orgs.listMembers, {
             org: org,
             role: 'admin',
             per_page: 100
         })
         return admins.map(admin => admin.login)
-    } catch (e) {
-        throw e
+    } catch (error) {
+        throw error
     }
 }
 
 async function getTeams(owner, repo) {
     try {
+        core.info('Querying repository teams')
         return await octokit.paginate(octokit.rest.repos.listTeams, {
             owner: owner,
             repo: repo,
             per_page: 100
         })
-    } catch (e) {
-        throw e
+    } catch (error) {
+        throw error
     }
 }
 
 async function getTeamMembers(org, slug) {
     try {
+        core.info('Querying team members')
         return await octokit.paginate(octokit.teams.listMembersInOrg, {
             org: org,
             team_slug: slug,
             role: 'all',
             per_page: 100
         })
-    } catch (e) {
-        throw e
+    } catch (error) {
+        throw error
     }
 }
 
 async function getCollaborators(owner, repo) {
     try {
+        core.info('Querying repository collaborators')
         return await octokit.paginate(octokit.rest.repos.listCollaborators, {
             owner: owner,
             repo: repo,
             per_page: 100
         })
-    } catch (e) {
-        throw e
+    } catch (error) {
+        throw error
     }
 }
 
 async function enableIssues() {
     try {
+        core.info('Enabling issues')
         const repos = await db.getRepos()
         for (const _repo of Object.keys(repos)) {
             const repo = repos[_repo]
             if (!repo.hasIssues) {
+                core.info(`Enabling issues for ${repo.name}`)
                 await octokit.repos.update({
                     owner: repo.owner,
                     repo: repo.name,
@@ -139,19 +152,21 @@ async function enableIssues() {
                 await db.setIssuesEnabled(repo.name)
             }
         }
-    } catch (e) {
-        throw e
+    } catch (error) {
+        throw error
     }
 }
 
 async function openIssues() {
     try {
+        core.info(`Opening issues`)
         const repos = await db.getRepos()
         for (const _repo of Object.keys(repos)) {
             const repo = repos[_repo]
             if (!repo.notified && !repo.issueNumber) {
                 let issue
                 try {
+                    core.info(`Opening issue for ${repo.owner}/${repo.name}`)
                     issue = await octokit.issues.create({
                         owner: repo.owner,
                         repo: repo.name,
@@ -159,8 +174,8 @@ async function openIssues() {
                         body: issueBody,
                         assignees: uniq(repo.admins.concat(repo.adminTeamMembers))
                     })
-                } catch (e) {
-                    console.log(`Unable to open issue in repository [${repo.name}]: ${e.message}`)
+                } catch (error) {
+                    console.log(`Unable to open issue in ${repo.owner}/${repo.name}: ${error.message}`)
                     continue
                 }
                 await db.setIssueNumber(repo.name, issue.data.number)
@@ -168,17 +183,19 @@ async function openIssues() {
                 await db.setNotified(repo.name, true)
             }
         }
-    } catch (e) {
-        throw e
+    } catch (error) {
+        throw error
     }
 }
 
 async function updateAdmins(repo, orgAdmins) {
     try {
+        core.info(`Updating repository admin information`)
         const adminTeamMembers = []
         const teams = await getTeams(repo.owner.login, repo.name)
         for (const team of teams) {
             if (team.permissions.admin || team.permissions.push) {
+                core.info(`Identified the following team with push permission: ${team.slug}`)
                 const members = await getTeamMembers(repo.owner.login, team.slug)
                 for (const member of members) {
                     adminTeamMembers.push(member.login)
@@ -190,14 +207,15 @@ async function updateAdmins(repo, orgAdmins) {
         for (const collaborator of collaborators) {
             if (!adminTeamMembers.includes(collaborator.login) && !orgAdmins.includes(collaborator.login)) {
                 if (collaborator.permissions.admin || collaborator.permissions.push) {
+                    core.info(`Identified the following collaborator with push permission: ${collaborator.login}`)
                     admins.push(collaborator.login)
                 }
             }
         }
         await db.setAdmins(repo.name, uniq(admins))
         await db.setTeamMembers(repo.name, uniq(adminTeamMembers))
-    } catch (e) {
-        throw e
+    } catch (error) {
+        throw error
     }
 }
 
@@ -236,8 +254,8 @@ async function main() {
         await collect(_owner, _days)
         await enableIssues()
         await openIssues()
-    } catch (e) {
-        console.log(`ERROR: ${e.message}`)
+    } catch (error) {
+        core.setFailed(error.message)
     }
 }
 
