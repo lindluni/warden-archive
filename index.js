@@ -29,7 +29,6 @@ const octokit = new _Octokit({
 })
 
 async function collect(owner, days) {
-    console.log("WEIRD")
     try {
         core.info(`Querying repositories for organization: ${owner}`)
         const repos = await octokit.paginate(octokit.repos.listForOrg, {
@@ -151,7 +150,7 @@ async function enableIssues() {
                 await octokit.repos.update({
                     owner: repo.owner,
                     repo: repo.name,
-                    hasIssues: true
+                    has_issues: true
                 })
                 await db.setIssuesEnabled(repo.name)
             }
@@ -181,8 +180,6 @@ async function openIssues() {
                     })
                 } catch (error) {
                     core.info(`Unable to open issue in ${repo.owner}/${repo.name}: ${error.message}`)
-                    console.log("hello")
-                    console.log(error)
                     continue
                 }
                 await db.setIssueNumber(repo.name, issue.data.number)
@@ -229,14 +226,14 @@ async function getAdmins(repo, orgAdmins) {
     }
 }
 
-async function uniq(array) {
+function uniq(array) {
     return [...new Set(array)]
 }
 
 let issueBody = `
 Repository Admins and Contributors,
 
-Your repository has been identified as having been inactive for a period of time greater than ${_days} days. The policy of the ${_owner} organizations states that repositories without code contributions for ${_days} are subject to automated archival.
+This repository has been identified as having been inactive for a period of time greater than ${_days} days. The policy of the ${_owner} organizations states that repositories without code contributions for ${_days} are subject to automated archival.
 
 We recognize that some repositories may be inactive for various reasons, and being inactive due to lack of code contributions does not necessarily mean the repository itself is inactive.
 
@@ -245,7 +242,7 @@ Remember, archiving a repository does not delete the repository, it remains full
 Repository admins and contributors with write access have 30 days to perform one of the following actions to allow this action to take place or to prevent their repository from archival:
 - Add the \`archive\` label to this issue, which will cause this repository to be archived at the end of the 30 day waiting period
 - Add the \`do-not-archive\` label to this issue, which will prevent this repository from being archived for ${_days} days, at which time the process will repeat itself
-- Add the \`do-not-archive\` topic to repository, this will prevent your repo from ever being flagged again
+- Add the \`do-not-archive\` topic to this repository, this will prevent your repo from ever being flagged again
 - Do nothing, and your repository will be automatically archived at the end of the 30 day waiting period
 - Archive the repository yourself by navigating to \`settings\` and selecting the \`Archive this repository\` button at the bottom of the page
 
@@ -259,10 +256,44 @@ For information on the ${_owner} archival guidelines please see this page: ${_gu
 `
 }
 
+async function createLabels() {
+    try {
+        core.info(`Opening issues`)
+        const repos = await db.getRepos()
+        for (const _repo of Object.keys(repos)) {
+            const repo = repos[_repo]
+            console.log(`Adding labels to: ${repo.name}`)
+            try {
+                await octokit.issues.createLabel({
+                    owner: repo.owner,
+                    repo: repo.name,
+                    name: 'do-not-archive',
+                });
+            } catch (e) {
+                console.log(`Labels already exist`)
+            }
+            try {
+                await octokit.issues.createLabel({
+                    owner: repo.owner,
+                    repo: repo.name,
+                    name: 'archive',
+                });
+            } catch (e) {
+                console.log(`Labels already exist`)
+            }
+
+        }
+    } catch (e) {
+        console.log(e)
+    }
+
+}
+
 async function main() {
     try {
         await collect(_owner, _days)
         await enableIssues()
+        await createLabels()
         await openIssues()
     } catch (error) {
         core.setFailed(error.message)
