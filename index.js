@@ -13,10 +13,10 @@ async function notify() {
     const _email = core.getInput('adminEmail', {required: true})
 
     const app = new Notify(octokit, _owner, _days, _guidelines, _adminTeam, _email)
-    await app.collect()
-    await app.enableIssues()
-    await app.createLabels()
-    await app.openIssues()
+    // await app.collect()
+    // await app.enableIssues()
+    // await app.createLabels()
+    // await app.openIssues()
 }
 
 async function main() {
