@@ -1,7 +1,7 @@
 jest.mock('@actions/github')
 
 const github = require('@actions/github')
-const Notify = require('../lib/notify')
+const Notifier = require('../lib/notify')
 
 describe('It notifies repository admins', () => {
     let octokit
@@ -9,7 +9,7 @@ describe('It notifies repository admins', () => {
 
     beforeEach(() => {
         octokit = new github.getOctokit('token')
-        app = new Notify(octokit, "", "", "", "", "")
+        app = new Notifier(octokit, "", "", "", "", "")
     })
 
     describe('by retrieving user information', () => {
